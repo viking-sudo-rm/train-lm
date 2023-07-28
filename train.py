@@ -2,6 +2,7 @@ from transformers import GPT2Tokenizer, GPT2LMHeadModel, GPT2Config
 from argparse import ArgumentParser
 import tqdm
 import torch
+import json
 # from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import ChainedScheduler, LinearLR, ConstantLR
 from torch.utils.data import DataLoader
@@ -18,7 +19,7 @@ EVAL_THRESHOLD = 1000
 # TODO: Cosine schedule after warm up, not constant.
 def parse_args():
     parser = ArgumentParser()
-    parser.add_argument("dataset", type=str, choices=["BookCorpus2", "Wikipedia (en)"])
+    parser.add_argument("dataset", type=str, choices=["BookCorpus2", "Wikipedia (en)", "YoutubeSubtitles", "HackerNews"])
     parser.add_argument("--lr", type=float, default=6e-4)
     parser.add_argument("--wd", type=float, default=.1)
     parser.add_argument("--beta1", type=float, default=.9)
@@ -71,6 +72,7 @@ scheduler = ChainedScheduler([
     ConstantLR(optimizer, factor=1., total_iters=1e20),
 ])
 
+# Save optimizer state, but should delete afterwards if you don't need it!
 accelerator = Accelerator()
 model, optimizer, train_dataloader = accelerator.prepare(model, optimizer, train_dataloader)
 
@@ -88,7 +90,6 @@ for step, batch in enumerate(iter(train_dataloader)):
         scheduler.step()
         optimizer.step()
         optimizer.zero_grad()
-
 
     if (step + 1) % args.save_threshold == 0 or step + 1 == len(train_dataloader):
         if not args.no_save:
@@ -118,3 +119,7 @@ print()
 print("steps:", steps)
 print()
 print("losses:", losses)
+
+blob = {"steps": steps, "losses": losses}
+with open(f"/home/willm/checkpoints/{args.dataset}/metrics.json", "w") as fh:
+    json.dump(blob, fh)
