@@ -16,7 +16,7 @@ parser.add_argument("--all", "-a", action="store_true")
 parser.add_argument("--mode", choices=["grid", "standard"], default="grid")
 parser.add_argument("--n_tokens", type=int, default=10000)
 parser.add_argument("--seed", type=int, default=42)
-parser.add_argument("--n_seeds", type="int", default=10)
+parser.add_argument("--n_seeds", type=int, default=10)
 args = parser.parse_args()
 
 LOAD = f"/home/willm/checkpoints/{args.corpus}"
