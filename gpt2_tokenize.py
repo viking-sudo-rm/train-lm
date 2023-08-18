@@ -1,3 +1,5 @@
+"""Tokenize using the GPT2 tokenizer."""
+
 from argparse import ArgumentParser
 from tqdm import tqdm
 

@@ -2,7 +2,7 @@ import torch
 from torch.nn import CrossEntropyLoss
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
-from transformers import GPT2LMHeadModel, GPT2Config, GPT2Tokenizer
+from transformers import GPT2LMHeadModel, GPT2Config
 from accelerate import Accelerator
 from tqdm import tqdm, trange
 import pickle
@@ -54,6 +54,10 @@ def get_target(next_tokens):
     tensor = tensor.to_sparse()
     return tensor
 
+def get_entropy(probs):
+    log_probs = torch.where(probs > 0, probs.log(), torch.zeros_like(probs))
+    return -(probs * log_probs).sum(dim=-1)
+
 @torch.no_grad()
 def get_losses(factors, target_dists, batch_size):
     lengths = torch.LongTensor([len(f) for f in factors])
@@ -61,6 +65,7 @@ def get_losses(factors, target_dists, batch_size):
     labels = torch.LongTensor([f[-1] for f in factors])
     all_losses = []
     all_cross_entropies = []
+    all_entropies = []
 
     for batch_idx in trange(0, len(factors), batch_size):
         batch_lengths = lengths[batch_idx:batch_idx + batch_size].to(device)
@@ -83,10 +88,16 @@ def get_losses(factors, target_dists, batch_size):
         # Compute cross entropy of possible continuations.
         final_states = hidden_states[arange, batch_lengths - 2]
         logits = model.lm_head(final_states)
-        cross_entropies = loss_fn(logits, batch_target_dists.to(device))
+        batch_target_dists = batch_target_dists.to(device)
+        cross_entropies = loss_fn(logits, batch_target_dists)
         all_cross_entropies.extend(cross_entropies.tolist())
 
-    return all_losses, all_cross_entropies
+        # Compute the entropy of the n-gram in the training set to measure how useful memorizing this would be.
+        # entropies = loss_fn(batch_target_dists.log(), batch_target_dists)
+        entropies = get_entropy(batch_target_dists)
+        all_entropies.extend(entropies.tolist())
+
+    return all_losses, all_cross_entropies, all_entropies
 
 def explore_counts_and_logprobs():
     print("Searching states in DAWG...")
@@ -102,7 +113,7 @@ def explore_counts_and_logprobs():
         if prefix > 0:
             train_count = dawg.get_count(state)
             train_logprob = np.log(dawg.get_count(state)) - np.log(dawg.get_count(prev_state))
-            explored[state] = (prefix, token, train_count, train_logprob)
+            explored[state] = (prefix, token, train_count, train_logprob, prev_state)
             factors[state] = factors[prev_state] + (token,)
             next_tokens[state] = [pair[1] for pair in edges]
         if prefix < args.max_length:
@@ -117,9 +128,9 @@ def explore_counts_and_logprobs():
     states = list(explored.keys())
     factors_list = [factors[state] for state in states]
     target_dists = [get_target(next_tokens[state]) for state in states]
-    losses, cross_entropies = get_losses(factors_list, target_dists, batch_size=args.batch_size)
-    for state, loss, cross_entropy in zip(states, losses, cross_entropies):
-        explored[state] = explored[state] + (loss, state, cross_entropy)
+    losses, cross_entropies, entropies = get_losses(factors_list, target_dists, batch_size=args.batch_size)
+    for state, loss, cross_entropy, entropy in zip(states, losses, cross_entropies, entropies):
+        explored[state] = explored[state] + (loss, cross_entropy, entropy)
 
     dir = os.path.dirname(save_path)
     if not os.path.isdir(dir):

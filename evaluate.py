@@ -17,32 +17,31 @@ def get_suffix_context(dawg, dataset):
         lengths.append(length)
     return lengths
 
-def get_avg_cross_entropy(lm, dawg, dataset):
-    # FIXME: Use train length here.
-    gte = good_turing_estimate(dawg, len(dataset))
-    cross_entropy = 0.
-    lm.reset(dawg)
-    for token in dataset:
-        prob = lm.get_probability(dawg, token, gte)
-        cross_entropy -= np.log2(prob)
-        lm.update(dawg, token)
-    return cross_entropy / len(dataset)
 
 parser = ArgumentParser()
 parser.add_argument("corpus", type=str)
 parser.add_argument("--debug", action="store_true")
-parser.add_argument("--save_path", type=str, default="/home/willm/results/BookCorpus2/suffix-contexts.dat")
+parser.add_argument("--save_path", type=str, default="/home/willm/results/{corpus}/suffix-contexts.dat")
 args = parser.parse_args()
 
-paths = ["/home/willm/splits/BookCorpus2/val.txt"]
-basedir = "/home/willm/splits/BookCorpus2/gpt2"
-paths.extend(os.path.join(basedir, fname) for fname in os.listdir(basedir)
-             if fname.endswith(".txt") and not fname.endswith("-raw.txt"))
+if args.corpus == "BookCorpus2":
+    paths = ["/home/willm/splits/BookCorpus2/val.txt"]
+    basedir = "/home/willm/splits/BookCorpus2/gpt2/138688"
+    paths.extend(os.path.join(basedir, fname) for fname in os.listdir(basedir)
+                 if fname.endswith(".txt") and not fname.endswith("-raw.txt"))
+elif args.corpus in ["wikitext-2-raw", "wikitext-103-raw"]:
+    paths = [f"/home/willm/splits/{args.corpus}/val.txt"]
+    basedir = f"/home/willm/splits/{args.corpus}/gpt2"
+    for ckpt in os.listdir(basedir):
+        ckpt_path = os.path.join(basedir, ckpt)
+        if not os.path.isdir(ckpt_path):
+            continue
+        paths.extend(os.path.join(ckpt_path, fname) for fname in os.listdir(ckpt_path)
+                     if fname.endswith(".txt") and not fname.endswith("-raw.txt"))
 
 dawg_path = f"/home/willm/results/{args.corpus}.dawg" if not args.debug else "/home/willm/results/wikitext-2-raw.dawg"
 print(f"Loading DAWG from {dawg_path}...")
 dawg = Dawg.load(dawg_path)
-# lm = KNLM("4gram_kn-0.2", 0.2, 4)
 print("DAWG loaded!")
 
 results = {}
@@ -50,11 +49,9 @@ for path in paths:
     print(f"Evaluating {path}...")
     with open(path, "r") as fh:
         tokens = [int(x) for x in fh.read().strip().split()]
-        test_tokens = tokens[:10000]
-    lengths = get_suffix_context(dawg, tokens)
-    results[path] = lengths
+    results[path] = get_suffix_context(dawg, tokens)
 
-with open(args.save_path, "wb") as fh:
+save_path = args.save_path.format(corpus=args.corpus)
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
+with open(save_path, "wb") as fh:
     pickle.dump(results, fh)
-
-# print("cross ent:", get_avg_cross_entropy(lm, dawg, gen_tokens))
